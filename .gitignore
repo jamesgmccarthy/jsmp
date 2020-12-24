@@ -1,0 +1,12 @@
+/data
+/models
+/lightning_logs
+/janestreet
+*.pkl
+*.txt
+*.pth
+*.vscode
+*__pycache__
+*.idea
+*.csv
+*.png
