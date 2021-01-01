@@ -1,24 +1,20 @@
 # %%
-from numpy.lib.function_base import _parse_input_dimensions
-from sklearn.metrics import roc_auc_score, roc_curve, plot_roc_curve
-import torch
-import numpy as np
-from torch._C import dtype
-import torch.nn as nn
-from torch.nn import functional as F
-from pytorch_lightning.core.lightning import LightningModule
-from pytorch_lightning import Trainer, trainer
-import datatable as dt
-import pandas as pd
-from torch.nn.modules.loss import BCEWithLogitsLoss
-from group_time_split import GroupTimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
-from torch.utils.data import Dataset, DataLoader, Subset, dataloader
-from torch.utils.data.sampler import BatchSampler, SequentialSampler
-from tqdm import tqdm
 import copy
 import datetime
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.metrics import roc_auc_score, roc_curve
+from torch.nn import functional as F
+from torch.utils.data import DataLoader, Subset
+from torch.utils.data.sampler import BatchSampler, SequentialSampler
+from tqdm import tqdm
+
+from group_time_split import GroupTimeSeriesSplit
+from utils import load_data, preprocess_data, FinData
 
 
 class Classifier(nn.Module):
@@ -37,16 +33,16 @@ class Classifier(nn.Module):
         self.batch_size = batch_size
         self.train_log = pd.DataFrame({'auc': [0], 'loss': [0]})
         self.val_log = pd.DataFrame({'auc': [0], 'loss': [0]})
-        for i in range(len(self.dims)+1):
+        for i in range(len(self.dims) + 1):
             if i == 0:
                 self.layer_list.append(
                     nn.Linear(self.input_size, self.dims[i]))
                 self.layer_list.append(nn.BatchNorm1d(self.dims[i]))
             elif i == (len(self.dims)):
                 self.layer_list.append(
-                    nn.Linear(self.dims[i-1], self.output_size))
+                    nn.Linear(self.dims[i - 1], self.output_size))
             else:
-                self.layer_list.append(nn.Linear(self.dims[i-1], self.dims[i]))
+                self.layer_list.append(nn.Linear(self.dims[i - 1], self.dims[i]))
                 self.layer_list.append(nn.BatchNorm1d(self.dims[i]))
         self.optimizer = torch.optim.Adam(
             self.parameters(), lr=self.learning_rate)
@@ -136,11 +132,11 @@ class Classifier(nn.Module):
                         self.eval()
                         out = self.validation_step(batch)
                     outs.append(out)
-                    num_samples = batch_size*b
+                    num_samples = batch_size * b
                     running_loss, running_auc = self.batch_step_end_metrics(
                         num_samples, b, out, running_loss, running_auc)
-                    bar.set_postfix(loss=f'{running_loss/b:0.5f}',
-                                    auc=f'{running_auc/b:0.5f}')
+                    bar.set_postfix(loss=f'{running_loss / b:0.5f}',
+                                    auc=f'{running_auc / b:0.5f}')
                 auc[phase], loss[phase] = self.epoch_end_metrics(outs)
                 self.log_results(phase, auc[phase], loss[phase])
                 if phase == 'val' and auc['val'] > best_auc:
@@ -157,74 +153,10 @@ class Classifier(nn.Module):
                 break
 
 
-class FinData(Dataset):
-    def __init__(self, data, target, mode='train', transform=None, cache_dir=None):
-        self.data = data
-        self.target = target
-        self.mode = mode
-        self.transform = transform
-        self.cache_dir = cache_dir
-        self.date = date
-
-    def __getitem__(self, index):
-        if torch.is_tensor(index):
-            index.to_list()
-        if self.transform:
-            return self.transform(self.data.iloc[index].values)
-        else:
-            if type(index) is list:
-                sample = {
-                    'target': torch.Tensor(self.target.iloc[index].values),
-                    'data': torch.FloatTensor(self.data[index]),
-                    'date': torch.Tensor(self.date.iloc[index].values)
-                }
-                return sample
-            else:
-                sample = {
-                    'target': torch.Tensor(self.target.iloc[index]),
-                    'data': torch.FloatTensor(self.data[index]),
-                    'date': torch.Tensor(self.date.iloc[index])
-                }
-                return sample
-
-    def __len__(self):
-        return len(self.data)
-
-
 def init_weights(m):
     if type(m) == nn.Linear:
         nn.init.xavier_normal_(m.weight, nn.init.calculate_gain('leaky_relu'))
         m.bias.data.fill_(1)
-
-# %%
-
-
-def load_data(root_dir, mode, overide=None):
-    if overide:
-        data = dt.fread(overide).to_pandas()
-    elif mode == 'train':
-        data = dt.fread(root_dir+'train.csv').to_pandas()
-    elif mode == 'test':
-        data = dt.fread(root_dir+'example_test.csv').to_pandas()
-    elif mode == 'sub':
-        data = dt.fread(root_dir+'example_sample_submission.csv').to_pandas()
-    return data
-
-
-def preprocess_data(data):
-    # data = data.query('weight > 0').reset_index(drop=True)
-    data['action'] = ((data['resp'].values) > 0).astype('float32')
-    features = [
-        col for col in data.columns if 'feature' in col and col != 'feature_0']+['weight']
-    for col in features:
-        data[col].fillna(data[col].mean(), inplace=True)
-    target = data['action']
-    date = data['date']
-    data = data[features]
-    scaler = StandardScaler()
-    data = scaler.fit_transform(data)
-
-    return data, target, features, date
 
 
 # %%
