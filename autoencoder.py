@@ -18,5 +18,4 @@ class AutoEncoder(nn.Module):
         self.es = early_stopping
         self.mp = self.create_model_file(model_path, fold)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-        self.
+        self

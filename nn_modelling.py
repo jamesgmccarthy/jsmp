@@ -1,7 +1,7 @@
 # %%
 import copy
 import datetime
-
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -12,7 +12,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset
 from torch.utils.data.sampler import BatchSampler, SequentialSampler
 from tqdm import tqdm
-
+from purged_group_time_series import PurgedGroupTimeSeriesSplit
 from group_time_split import GroupTimeSeriesSplit
 from utils import load_data, preprocess_data, FinData
 
@@ -42,13 +42,19 @@ class Classifier(nn.Module):
                 self.layer_list.append(
                     nn.Linear(self.dims[i - 1], self.output_size))
             else:
-                self.layer_list.append(nn.Linear(self.dims[i - 1], self.dims[i]))
+                self.layer_list.append(
+                    nn.Linear(self.dims[i - 1], self.dims[i]))
                 self.layer_list.append(nn.BatchNorm1d(self.dims[i]))
         self.optimizer = torch.optim.Adam(
             self.parameters(), lr=self.learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, patience=5, factor=0.1, min_lr=1e-7, eps=1e-08
         )
+
+    def create_model_file(self, model_file, fold):
+        if not os.path.isdir('models'):
+            os.mkdir('models')
+        return 'models/nn_fold_{fold}_{model_file}'
 
     def forward(self, x):
         for i, layer in enumerate(self.layer_list):
@@ -161,17 +167,18 @@ def init_weights(m):
 
 # %%
 data = load_data('data/', mode='train', overide='filtered_train.csv')
-data, target, features, date = preprocess_data(data)
+data, target, features, date = preprocess_data(data, scale=True)
 # %%
-dataset = FinData(data, target, features)
+dataset = FinData(data=data, target=target, date=date)
 # %%
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dims = [384, 896, 896, 394]
-batch_size = 1000
+batch_size = 500
 epochs = 100
-gts = GroupTimeSeriesSplit()
-train_model = False
-eval_model = True
+gts = GroupTimeSeriesSplit(n_splits=5)
+#gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=31)
+train_model = True
+eval_model = False
 for i, (train_idx, val_idx) in enumerate(gts.split(data, groups=date)):
     if train_model:
         model = Classifier(input_size=len(features), output_size=1,

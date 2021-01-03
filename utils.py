@@ -54,7 +54,7 @@ def preprocess_data(data, scale=False):
     # data = data.query('weight > 0').reset_index(drop=True)
     data['action'] = ((data['resp'].values) > 0).astype('float32')
     features = [
-                   col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
+        col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
     for col in features:
         data[col].fillna(data[col].mean(), inplace=True)
     target = data['action']
