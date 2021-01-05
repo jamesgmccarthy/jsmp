@@ -1,3 +1,4 @@
+# %%
 from numba import njit
 import os
 import joblib
@@ -13,16 +14,14 @@ import pandas as pd
 import datatable as dt
 import numpy as np
 import optuna
-from utils import load_data, preprocess_data, FinData
+from torch.nn.modules.activation import Sigmoid
+
+from utils import load_data, preprocess_data, FinData, create_dataloaders
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
 from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
 from pytorch_lightning import Callback
 from pytorch_lightning.metrics.functional import auroc, f1
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from optuna.integration import PyTorchLightningPruningCallback
-import datetime
-import neptune
-import neptunecontrib.monitoring.optuna as opt_utils
 from pytorch_lightning import loggers as pl_loggers
 import janestreet
 from tqdm import tqdm
@@ -41,7 +40,7 @@ class MetricsCallback(Callback):
 
 
 class Classifier(pl.LightningModule):
-    def __init__(self, input_size, output_size, trial: optuna.Trial = None, params=None,
+    def __init__(self, input_size, output_size, params=None,
                  model_path='models/'):
         super(Classifier, self).__init__()
         dim_1 = params['dim_1']
@@ -54,11 +53,11 @@ class Classifier(pl.LightningModule):
         self.input_size = input_size
         self.output_size = output_size
         self.loss = nn.BCEWithLogitsLoss()
-
         self.train_log = pd.DataFrame({'auc': [0], 'loss': [0]})
         self.val_log = pd.DataFrame({'auc': [0], 'loss': [0]})
         self.model_path = model_path
         self.encoder = nn.Sequential(
+            nn.BatchNorm1d(input_size),
             nn.Linear(input_size, dim_1),
             nn.BatchNorm1d(dim_1),
             self.activation(),
@@ -87,35 +86,37 @@ class Classifier(pl.LightningModule):
         y = y.view(-1)
         x = x.view(x.size(1), -1)
         logits = self(x)
-        logits = torch.sigmoid(logits).view(-1)
+        logits = logits.view(-1)
         loss = self.loss(input=logits,
                          target=y)
+        logits = torch.sigmoid(logits)
         auc_metric = roc_auc_score(y_true=y.cpu().numpy(),
                                    y_score=logits.cpu().detach().numpy())
-        self.log('train_auc', auc_metric, on_step=False, on_epoch=True)
-        pbar = {'t_auc': auc_metric}
-        return {'loss': loss, 'progress_bar': pbar}
+        self.log('train_auc', auc_metric, on_step=False,
+                 on_epoch=True, prog_bar=True)
+        self.log('train_loss', loss, prog_bar=True)
+        return {'loss': loss}
 
     def validation_step(self, batch, batch_idx):
         x, y = batch['data'], batch['target']
         y = y.view(-1)
         x = x.view(x.size(1), -1)
         logits = self(x)
-        logits = torch.sigmoid(logits).view(-1)
+        logits = logits.view(-1)
         loss = self.loss(input=logits,
                          target=y)
+        logits = torch.sigmoid(logits)
+
         auc = roc_auc_score(y_true=y.cpu().numpy(),
                             y_score=logits.cpu().detach().numpy())
-        pbar = {'v_auc': auc}
-        return {'loss': loss, 'auc': auc, 'progress_bar': pbar}
+
+        return {'loss': loss, 'y': y, 'logits': logits, 'auc': auc}
 
     def validation_epoch_end(self, val_step_outputs):
         epoch_loss = torch.tensor([x['loss'] for x in val_step_outputs]).mean()
         epoch_auc = torch.tensor([x['auc'] for x in val_step_outputs]).mean()
-        pbar = {'val_loss': epoch_loss,
-                'val_auc': epoch_auc}
-        self.log('val_auc', epoch_auc)
-        return {'val_loss': epoch_loss, 'val_auc': epoch_auc, 'progress_bar': pbar}
+        self.log('val_loss', epoch_loss, prog_bar=True)
+        self.log('val_auc', epoch_auc, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
@@ -124,6 +125,23 @@ class Classifier(pl.LightningModule):
         epoch_loss = torch.tensor([x['loss'] for x in outputs]).mean()
         epoch_auc = torch.tensor([x['auc'] for x in outputs]).mean()
         return {'test_loss': epoch_loss, 'test_auc': epoch_auc}
+
+    def predict(self, batch):
+        self.eval()
+        x, y = batch['data'], batch['target']
+        x = x.view(x.size(1), -1)
+        x = self(x)
+        return torch.sigmoid(x)
+
+    def prediction_loop(self, dataloader, return_tensor=True):
+        bar = tqdm(dataloader)
+        preds = []
+        for batch in bar:
+            preds.append(self.predict(batch))
+        if return_tensor:
+            return torch.cat(preds, dim=0)
+        else:
+            return preds
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -141,31 +159,29 @@ def init_weights(m):
 
 def train_cross_val():
     data = load_data(root_dir='./data/', mode='train')
-    data, target, features, date = preprocess_data(data, scale=True)
+    data, target, features, date = preprocess_data(data, nn=True)
     dataset = FinData(data=data, target=target, date=date)
     gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=31)
-    batch_size = 1108
+    batch_size = 5000
     input_size = data.shape[-1]
     output_size = 1
     tb_logger = pl_loggers.TensorBoardLogger('logs/')
-    p = {'dim_1': 496, 'dim_2': 385, 'dim_3': 143, 'dim_4': 100,
-         'activation': nn.ReLU,
-         'dropout': 0.49934040768390675,
-         'lr': 0.0006661013327594837}
+    p = {'batch_size': 4500,
+         'dim_1': 312,
+         'dim_2': 657,
+         'dim_3': 723,
+         'dim_4': 349,
+         'activation': nn.LeakyReLU,
+         'dropout': 0.06364070747726647,
+         'lr': 0.0005004290173704919}
 
     for i, (train_idx, val_idx) in enumerate(gts.split(data, groups=date)):
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
             os.path.join('models/', "fold_{}".format(i)), monitor="val_auc")
         model = Classifier(input_size=input_size,
                            output_size=output_size, trial=None, params=p)
-        train_set, val_set = Subset(
-            dataset, train_idx), Subset(dataset, val_idx)
-        train_sampler = BatchSampler(SequentialSampler(
-            train_set), batch_size=batch_size, drop_last=False)
-        val_sampler = BatchSampler(SequentialSampler(
-            val_set), batch_size=batch_size, drop_last=False)
-        dataloaders = {'train': DataLoader(dataset, sampler=train_sampler, num_workers=10, pin_memory=True),
-                       'val': DataLoader(dataset, sampler=val_sampler, num_workers=10, pin_memory=True)}
+        dataloaders = create_dataloaders(
+            dataset, indexes={'train': train_idx, 'val': val_idx}, batch_size=batch_size)
         es = EarlyStopping(monitor='val_auc', patience=10,
                            min_delta=0.0005, mode='max')
         trainer = pl.Trainer(logger=tb_logger,
@@ -181,46 +197,42 @@ def train_cross_val():
 
 
 def final_train(load=False):
-    data = load_data(root_dir='./data/', mode='train')
-    data, target, features, date = preprocess_data(data, scale=True)
+    data_ = load_data(root_dir='./data/', mode='train')
+    data, target, features, date = preprocess_data(data_, nn=True)
     dataset = FinData(data=data, target=target, date=date)
     gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=31)
-    batch_size = 1108
+    batch_size = 5000
     input_size = data.shape[-1]
     output_size = 1
-    p = {'dim_1': 496, 'dim_2': 385, 'dim_3': 143, 'dim_4': 100,
-         'activation': nn.ReLU,
-         'dropout': 0.49934040768390675,
-         'lr': 0.0006661013327594837}
+    p = {'batch_size': 4600,
+         'dim_1': 230,
+         'dim_2': 850,
+         'dim_3': 780,
+         'dim_4': 190,
+         'activation': nn.LeakyReLU,
+         'dropout': 0.017122456592972537,
+         'lr': 0.00013131268366473552}
     for i, (train_idx, val_idx) in enumerate(gts.split(data, groups=date)):
         if i == 4:
             if load:
-                model = Classifier(input_size=input_size,
-                                   output_size=output_size, params=p)
-                trainer = pl.Trainer(
-                    max_epochs=26, gpus=1, resume_from_checkpoint=load)
+                model = Classifier.load_from_checkpoint(checkpoint_path=load, input_size=input_size,
+                                                        output_size=output_size, params=p)
+                trainer = pl.Trainer(max_epochs=3, gpus=1, precision=16)
                 model.lr = model.lr/100
-                train_set = Subset(dataset, val_idx)
-                train_sampler = BatchSampler(SequentialSampler(
-                    train_set), batch_size=batch_size, drop_last=False)
-                train_loader = DataLoader(
-                    dataset, sampler=train_sampler, num_workers=10, pin_memory=True)
-                trainer.fit(model, train_dataloader=train_loader,
-                            val_dataloaders=train_loader)
+                dataloaders = create_dataloaders(
+                    dataset, indexes={'train': train_idx}, batch_size=batch_size)
+
+                trainer.fit(model, train_dataloader=dataloaders['train'],
+                            val_dataloaders=dataloaders['train'])
+                # trainer.test(test_dataloaders=train_loader)
                 return model, features
             else:
                 checkpoint_callback = ModelCheckpoint(
                     dirpath='logs', monitor='val_auc', mode='max', save_top_k=1, period=10)
                 model = Classifier(input_size=input_size,
-                                   output_size=output_size, trial=None, params=p)
-                train_set, val_set = Subset(
-                    dataset, train_idx), Subset(dataset, val_idx)
-                train_sampler = BatchSampler(SequentialSampler(
-                    train_set), batch_size=batch_size, drop_last=False)
-                val_sampler = BatchSampler(SequentialSampler(
-                    val_set), batch_size=batch_size, drop_last=False)
-                dataloaders = {'train': DataLoader(dataset, sampler=train_sampler, num_workers=10, pin_memory=True),
-                               'val': DataLoader(dataset, sampler=val_sampler, num_workers=10, pin_memory=True)}
+                                   output_size=output_size, params=p)
+                dataloaders = create_dataloaders(
+                    dataset, indexes={'train': train_idx, 'val': val_idx}, batch_size=batch_size)
                 es = EarlyStopping(monitor='val_auc',
                                    patience=10, min_delta=0.0005, mode='max')
                 trainer = pl.Trainer(max_epochs=500,
@@ -229,8 +241,13 @@ def final_train(load=False):
                                      precision=16)
                 trainer.fit(
                     model, train_dataloader=dataloaders['train'], val_dataloaders=dataloaders['val'])
-            trainer.test(test_dataloaders=dataloaders['val'])
-            return model, checkpoint_callback, features
+                preds = model.prediction_loop(dataloaders['val'])
+                trainer.test(test_dataloaders=dataloaders['val'])
+                out = data_.iloc[val_idx, :]
+                out['preds'] = preds.detach().numpy()
+                out['target'] = target[val_idx]
+                out.to_csv('output.csv')
+            return model
 
 
 @njit
@@ -248,17 +265,23 @@ def test_model(model, features):
         vals = torch.FloatTensor(
             fillna_npwhere_njit(test_df[features].values, 0.0))
 
-        preds = torch.sigmoid(model.forward(vals.view(1, -1)))
-        sample_prediction_df.action = (preds > 0.5).to(dtype=int)
+        preds = torch.sigmoid(model.forward(vals.view(1, -1))).item()
+        sample_prediction_df.action = np.where(
+            preds > 0.5, 1, 0).astype(int).item()
         env.predict(sample_prediction_df)
+# %%
 
 
 def main():
     # train_cross_val()
-    model, checkpoint, features = final_train()
-    best_model_path = checkpoint.best_model_path
-    model, features = final_train(load=best_model_path)
-    test_model(model, features)
+    model = final_train()
+    # best_model_path = checkpoint.best_model_path
+    # model, features = final_train(load=best_model_path)
+    # test_model(model, features)
+    return model
 
 
-main()
+if __name__ == '__main__':
+    model = main()
+
+# %%

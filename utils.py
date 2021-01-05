@@ -1,7 +1,8 @@
 import datatable as dt
 import torch
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data import Dataset
+import numpy as np
+from torch.utils.data import Dataset, Subset, BatchSampler, SequentialSampler, DataLoader
 
 
 class FinData(Dataset):
@@ -50,8 +51,8 @@ def load_data(root_dir, mode, overide=None):
     return data
 
 
-def preprocess_data(data, scale=False):
-    # data = data.query('weight > 0').reset_index(drop=True)
+def preprocess_data(data, scale=False, nn=False):
+    data = data.query('weight > 0').reset_index(drop=True)
     data['action'] = ((data['resp'].values) > 0).astype('float32')
     features = [
         col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
@@ -63,5 +64,39 @@ def preprocess_data(data, scale=False):
     if scale:
         scaler = StandardScaler()
         data = scaler.fit_transform(data)
-
+    if not scale and nn:
+        data = data.values
     return data, target, features, date
+
+
+def weighted_mean(scores, sizes):
+    largest = np.max(sizes)
+    weights = [size / largest for size in sizes]
+    return np.average(scores, weights=weights)
+
+
+def create_dataloaders(dataset: Dataset, indexes: dict, batch_size):
+    train_idx = indexes.get('train', None)
+    val_idx = indexes.get('val', None)
+    test_idx = indexes.get('test', None)
+    dataloaders = {}
+    if train_idx:
+        train_set = Subset(
+            dataset, train_idx)
+        train_sampler = BatchSampler(SequentialSampler(
+            train_set), batch_size=batch_size, drop_last=False)
+        dataloaders['train'] = DataLoader(
+            dataset, sampler=train_sampler, num_workers=10, pin_memory=True)
+    if val_idx:
+        val_set = Subset(dataset, val_idx)
+        val_sampler = BatchSampler(SequentialSampler(
+            val_set), batch_size=batch_size, drop_last=False)
+        dataloaders['val'] = DataLoader(
+            dataset, sampler=val_sampler, num_workers=10, pin_memory=True)
+    if test_idx:
+        test_set = Subset(dataset, test_idx)
+        test_sampler = BatchSampler(SequentialSampler(
+            test_set), batch_size=batch_size, drop_last=False)
+        dataloaders['test'] = DataLoader(
+            dataset, sampler=test_sampler, num_workers=10, pin_memory=True)
+    return dataloaders

@@ -13,6 +13,7 @@ import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
+from utils import weighted_mean
 
 
 def load_data(root_dir, mode, overide=None):
@@ -32,7 +33,7 @@ def preprocess_data(data):
     data['action'] = ((data['resp'].values) > 0).astype('float32')
     # data = data.query('date > 80').reset_index(drop=True)
     features = [
-                   col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
+        col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
     for col in features:
         data[col].fillna(0.0, inplace=True)
     target = data['action']
@@ -42,12 +43,6 @@ def preprocess_data(data):
     # data = scaler.fit_transform(data)
 
     return data, target, features, date
-
-
-def weighted_mean(scores, sizes):
-    largest = np.max(sizes)
-    weights = [size / largest for size in sizes]
-    return np.average(scores, weights=weights)
 
 
 def optimize(trial: optuna.trial.Trial):
