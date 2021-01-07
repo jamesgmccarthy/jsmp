@@ -131,7 +131,7 @@ class Classifier(pl.LightningModule):
         x, y = batch['data'], batch['target']
         x = x.view(x.size(1), -1)
         x = self(x)
-        return torch.sigmoid(x)
+        return torch.sigmoid(x.view(-1))
 
     def prediction_loop(self, dataloader, return_tensor=True):
         bar = tqdm(dataloader)
@@ -218,7 +218,7 @@ def final_train(load=False):
                 model = Classifier.load_from_checkpoint(checkpoint_path=load, input_size=input_size,
                                                         output_size=output_size, params=p)
                 trainer = pl.Trainer(max_epochs=3, gpus=1, precision=16)
-                model.lr = model.lr/100
+                model.lr = model.lr / 100
                 dataloaders = create_dataloaders(
                     dataset, indexes={'train': train_idx}, batch_size=batch_size)
 
@@ -269,6 +269,8 @@ def test_model(model, features):
         sample_prediction_df.action = np.where(
             preds > 0.5, 1, 0).astype(int).item()
         env.predict(sample_prediction_df)
+
+
 # %%
 
 
