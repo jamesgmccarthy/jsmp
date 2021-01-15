@@ -1,31 +1,23 @@
 # %%
-from numba import njit
 import os
-import joblib
-from numpy.core.numeric import True_
-from pytorch_lightning import callbacks
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
-from pytorch_lightning.metrics.functional.classification import precision
-import torch
-from torch._C import dtype
-import torch.nn as nn
-import pytorch_lightning as pl
-import pandas as pd
-import datatable as dt
-import numpy as np
-import optuna
-from torch.nn.modules.activation import Sigmoid
 
-from utils import load_data, preprocess_data, FinData, create_dataloaders
-from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
+import numpy as np
+import pandas as pd
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from numba import njit
 from pytorch_lightning import Callback
-from pytorch_lightning.metrics.functional import auroc, f1
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning import loggers as pl_loggers
-import janestreet
-from tqdm import tqdm
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
+
+import janestreet
+from purged_group_time_series import PurgedGroupTimeSeriesSplit
+from utils import load_data, preprocess_data, FinData, create_dataloaders
 
 
 class MetricsCallback(Callback):
@@ -47,12 +39,14 @@ class Classifier(pl.LightningModule):
         dim_2 = params['dim_2']
         dim_3 = params['dim_3']
         dim_4 = params['dim_4']
+        dim_5 = params['dim_5']
         self.dropout_prob = params['dropout']
         self.lr = params['lr']
         self.activation = params['activation']
         self.input_size = input_size
         self.output_size = output_size
         self.loss = nn.BCEWithLogitsLoss()
+        self.label_smoothing = params['label_smoothing']
         self.train_log = pd.DataFrame({'auc': [0], 'loss': [0]})
         self.val_log = pd.DataFrame({'auc': [0], 'loss': [0]})
         self.model_path = model_path
@@ -74,7 +68,11 @@ class Classifier(pl.LightningModule):
             nn.BatchNorm1d(dim_4),
             self.activation(),
             nn.Dropout(p=self.dropout_prob),
-            nn.Linear(dim_4, self.output_size)
+            nn.Linear(dim_4, dim_5),
+            nn.BatchNorm1d(dim_5),
+            self.activation(),
+            nn.Dropout(p=self.dropout_prob),
+            nn.Linear(dim_5, self.output_size)
         )
 
     def forward(self, x):
@@ -87,8 +85,10 @@ class Classifier(pl.LightningModule):
         x = x.view(x.size(1), -1)
         logits = self(x)
         logits = logits.view(-1)
-        loss = self.loss(input=logits,
-                         target=y)
+        y_smo = y.float() * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
+        loss = F.binary_cross_entropy_with_logits(logits, y_smo.type_as(logits))
+        # loss = self.loss(input=logits,
+        # target=y)
         logits = torch.sigmoid(logits)
         auc_metric = roc_auc_score(y_true=y.cpu().numpy(),
                                    y_score=logits.cpu().detach().numpy())
@@ -103,8 +103,10 @@ class Classifier(pl.LightningModule):
         x = x.view(x.size(1), -1)
         logits = self(x)
         logits = logits.view(-1)
-        loss = self.loss(input=logits,
-                         target=y)
+        y_smo = y.float() * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
+        loss = F.binary_cross_entropy_with_logits(logits, y_smo.type_as(logits))
+        # loss = self.loss(input=logits,
+        #                 target=y)
         logits = torch.sigmoid(logits)
 
         auc = roc_auc_score(y_true=y.cpu().numpy(),
@@ -166,15 +168,16 @@ def train_cross_val():
     input_size = data.shape[-1]
     output_size = 1
     tb_logger = pl_loggers.TensorBoardLogger('logs/')
-    p = {'batch_size': 4500,
-         'dim_1': 312,
-         'dim_2': 657,
-         'dim_3': 723,
-         'dim_4': 349,
+    p = {'batch_size': 3180,
+         'dim_1': 148,
+         'dim_2': 139,
+         'dim_3': 117,
+         'dim_4': 44,
+         'dim_5': 21,
          'activation': nn.LeakyReLU,
-         'dropout': 0.06364070747726647,
-         'lr': 0.0005004290173704919}
-
+         'dropout': 0.04265306522456704,
+         'lr': 0.00024157498917062636,
+         'label_smoothing': 0.008798392865018973}
     for i, (train_idx, val_idx) in enumerate(gts.split(data, groups=date)):
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
             os.path.join('models/', "fold_{}".format(i)), monitor="val_auc")
@@ -204,14 +207,16 @@ def final_train(load=False):
     batch_size = 5000
     input_size = data.shape[-1]
     output_size = 1
-    p = {'batch_size': 4600,
-         'dim_1': 230,
-         'dim_2': 850,
-         'dim_3': 780,
-         'dim_4': 190,
+    p = {'batch_size': 4827,
+         'dim_1': 118,
+         'dim_2': 116,
+         'dim_3': 94,
+         'dim_4': 105,
+         'dim_5': 129,
          'activation': nn.LeakyReLU,
-         'dropout': 0.017122456592972537,
-         'lr': 0.00013131268366473552}
+         'dropout': 0.01036496513951744,
+         'lr': 0.0004437349972099894,
+         'label_smoothing': 0.09401544509474698}
     for i, (train_idx, val_idx) in enumerate(gts.split(data, groups=date)):
         if i == 4:
             if load:
@@ -243,10 +248,6 @@ def final_train(load=False):
                     model, train_dataloader=dataloaders['train'], val_dataloaders=dataloaders['val'])
                 preds = model.prediction_loop(dataloaders['val'])
                 trainer.test(test_dataloaders=dataloaders['val'])
-                out = data_.iloc[val_idx, :]
-                out['preds'] = preds.detach().numpy()
-                out['target'] = target[val_idx]
-                out.to_csv('output.csv')
             return model
 
 

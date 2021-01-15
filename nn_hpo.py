@@ -1,27 +1,20 @@
-import os
-import joblib
-from numpy.core.numeric import True_
-from pytorch_lightning import callbacks
-from pytorch_lightning.metrics.functional.classification import precision
-import torch
-import torch.nn as nn
-import pytorch_lightning as pl
-import pandas as pd
-import datatable as dt
-import numpy as np
-import optuna
-from utils import load_data, preprocess_data, FinData, weighted_mean
-from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
-from pytorch_lightning import Callback
-from pytorch_lightning.metrics.functional import auroc, f1
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from optuna.integration import PyTorchLightningPruningCallback
 import datetime
+import os
+
+import joblib
 import neptune
 import neptunecontrib.monitoring.optuna as opt_utils
-from sklearn.metrics import roc_auc_score
+import optuna
+import pytorch_lightning as pl
+import torch.nn as nn
+from optuna.integration import PyTorchLightningPruningCallback
+from pytorch_lightning import Callback
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
+
 from lightning_nn import Classifier
+from purged_group_time_series import PurgedGroupTimeSeriesSplit
+from utils import load_data, preprocess_data, FinData, weighted_mean
 
 
 class MetricsCallback(Callback):
@@ -43,10 +36,11 @@ def init_weights(m):
 
 def create_param_dict(trial, trial_file=None):
     if trial:
-        dim_1 = trial.suggest_int('dim_1', 100, 500)
-        dim_2 = trial.suggest_int('dim_2', 500, 1000)
-        dim_3 = trial.suggest_int('dim_3', 500, 1000)
-        dim_4 = trial.suggest_int('dim_4', 100, 500)
+        dim_1 = trial.suggest_int('dim_1', 10, 200)
+        dim_2 = trial.suggest_int('dim_2', 10, 200)
+        dim_3 = trial.suggest_int('dim_3', 10, 200)
+        dim_4 = trial.suggest_int('dim_4', 10, 200)
+        dim_5 = trial.suggest_int('dim_5', 10, 200)
         act_func = trial.suggest_categorical(
             'activation', ['relu', 'leaky_relu'])
         act_dict = {'relu': nn.ReLU, 'leaky_relu': nn.LeakyReLU,
@@ -54,9 +48,10 @@ def create_param_dict(trial, trial_file=None):
         act_func = act_dict[act_func]
         dropout = trial.suggest_uniform('dropout', 0.01, 0.1)
         lr = trial.suggest_uniform('lr', 0.00005, 0.005)
+        label_smooth = trial.suggest_uniform('label_smoothing', 0.001, 0.1)
         p = {'dim_1': dim_1, 'dim_2': dim_2, 'dim_3': dim_3,
-             'dim_4': dim_4, 'activation': act_func, 'dropout': dropout,
-             'lr': lr}
+             'dim_4': dim_4, 'dim_5': dim_5, 'activation': act_func, 'dropout': dropout,
+             'lr': lr, 'label_smoothing': label_smooth}
     elif trial_file:
         p = joblib.load(trial_file).best_params
     return p
@@ -111,5 +106,5 @@ nn_exp = neptune.create_experiment('NN_HPO')
 nn_neptune_callback = opt_utils.NeptuneCallback(experiment=nn_exp)
 pruner = optuna.pruners.MedianPruner()
 study = optuna.create_study(direction='maximize', pruner=pruner)
-study.optimize(optimize, n_trials=50, callbacks=[nn_neptune_callback])
+study.optimize(optimize, n_trials=100, callbacks=[nn_neptune_callback])
 joblib.dump(study, f'HPO/nn_hpo_{str(datetime.datetime.now().date())}.pkl')

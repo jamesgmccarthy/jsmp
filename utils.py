@@ -1,7 +1,9 @@
 import datatable as dt
-import torch
-from sklearn.preprocessing import StandardScaler
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, Subset, BatchSampler, SequentialSampler, DataLoader
 
 
@@ -23,20 +25,46 @@ class FinData(Dataset):
             if type(index) is list:
                 sample = {
                     'target': torch.Tensor(self.target.iloc[index].values),
-                    'data':   torch.FloatTensor(self.data[index]),
-                    'date':   torch.Tensor(self.date.iloc[index].values)
+                    'data': torch.FloatTensor(self.data[index]),
+                    'date': torch.Tensor(self.date.iloc[index].values)
                 }
                 return sample
             else:
                 sample = {
                     'target': torch.Tensor(self.target.iloc[index]),
-                    'data':   torch.FloatTensor(self.data[index]),
-                    'date':   torch.Tensor(self.date.iloc[index])
+                    'data': torch.FloatTensor(self.data[index]),
+                    'date': torch.Tensor(self.date.iloc[index])
                 }
                 return sample
 
     def __len__(self):
         return len(self.data)
+
+
+def linear_combination(x, y, epsilon):
+    print(x)
+    print(y)
+    return epsilon * x + (1 - epsilon) * y
+
+
+def reduce_loss(loss, reduction='mean'):
+    return loss.mean() if reduction == 'mean' else loss.sum() if reduction == 'sum' else loss
+
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, epsilon: float = 0.1, reduction='mean'):
+        super().__init__()
+        self.epsilon = epsilon
+        self.reduction = reduction
+
+    def forward(self, preds, target):
+        print(preds.shape)
+        print(target.shape)
+        n = preds.size()[-1]
+        log_preds = F.log_softmax(preds, dim=-1)
+        loss = reduce_loss(-log_preds.sum(dim=-1), self.reduction)
+        nll = F.nll_loss(log_preds, target, reduction=self.reduction)
+        return linear_combination(loss / n, nll, self.epsilon)
 
 
 def load_data(root_dir, mode, overide=None):
@@ -55,7 +83,7 @@ def preprocess_data(data, scale=False, nn=False):
     data = data.query('weight > 0').reset_index(drop=True)
     data['action'] = ((data['resp'].values) > 0).astype('float32')
     features = [
-        col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
+                   col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
     for col in features:
         data[col].fillna(data[col].mean(), inplace=True)
     target = data['action']
