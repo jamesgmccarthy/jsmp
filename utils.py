@@ -1,5 +1,9 @@
+import os
+import random
+
 import datatable as dt
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,14 +11,18 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, Subset, BatchSampler, SequentialSampler, DataLoader
 
 
+# from lightning_nn import Classifier
+
+
 class FinData(Dataset):
-    def __init__(self, data, target, date, mode='train', transform=None, cache_dir=None):
+    def __init__(self, data, target, date, mode='train', transform=None, cache_dir=None, multi=False):
         self.data = data
         self.target = target
         self.mode = mode
         self.transform = transform
         self.cache_dir = cache_dir
         self.date = date
+        self.multi = multi
 
     def __getitem__(self, index):
         if torch.is_tensor(index):
@@ -23,19 +31,33 @@ class FinData(Dataset):
             return self.transform(self.data.iloc[index].values)
         else:
             if type(index) is list:
-                sample = {
-                    'target': torch.Tensor(self.target.iloc[index].values),
-                    'data': torch.FloatTensor(self.data[index]),
-                    'date': torch.Tensor(self.date.iloc[index].values)
-                }
-                return sample
+                if self.multi == False:
+                    sample = {
+                        'target': torch.Tensor(self.target.iloc[index].values),
+                        'data':   torch.FloatTensor(self.data[index]),
+                        'date':   torch.Tensor(self.date.iloc[index].values)
+                    }
+                elif self.multi == True:
+                    sample = {
+                        'target': torch.Tensor([self.target[i, index] for i in range(self.target.shape[0])]),
+                        'data':   torch.FloatTensor(self.data[index]),
+                        'date':   torch.Tensor(self.date.iloc[index].values)
+                    }
+
             else:
-                sample = {
-                    'target': torch.Tensor(self.target.iloc[index]),
-                    'data': torch.FloatTensor(self.data[index]),
-                    'date': torch.Tensor(self.date.iloc[index])
-                }
-                return sample
+                if self.multi == False:
+                    sample = {
+                        'target': torch.Tensor(self.target.iloc[index]),
+                        'data':   torch.FloatTensor(self.data[index]),
+                        'date':   torch.Tensor(self.date.iloc[index])
+                    }
+                elif self.multi == True:
+                    sample = {
+                        'target': torch.Tensor([self.target[i, index] for i in range(self.target.shape[0])]),
+                        'data':   torch.FloatTensor(self.data[index]),
+                        'date':   torch.Tensor(self.date.iloc[index])
+                    }
+        return sample
 
     def __len__(self):
         return len(self.data)
@@ -58,8 +80,6 @@ class LabelSmoothingCrossEntropy(nn.Module):
         self.reduction = reduction
 
     def forward(self, preds, target):
-        print(preds.shape)
-        print(target.shape)
         n = preds.size()[-1]
         log_preds = F.log_softmax(preds, dim=-1)
         loss = reduce_loss(-log_preds.sum(dim=-1), self.reduction)
@@ -79,15 +99,57 @@ def load_data(root_dir, mode, overide=None):
     return data
 
 
-def preprocess_data(data, scale=False, nn=False):
+def preprocess_data(data: pd.DataFrame, scale: bool = False, nn: bool = False,
+                    action: str = 'weight'):
+    """
+    Preprocess the data.
+
+    Parameters
+    ----------
+    data
+        Pandas DataFrame
+    scale
+        scale data with unit std and 0 mean
+    nn
+        return data as np.array
+    missing
+        options to replace missing data with - mean, median, 0
+    action
+        options to create action value  - weight = (weight * resp) > 0
+                                        - combined = (resp_cols) > 0
+                                        - multi = each resp cols >0
+
+    Returns
+    -------
+    """
+
     data = data.query('weight > 0').reset_index(drop=True)
-    data['action'] = ((data['resp'].values) > 0).astype('float32')
-    features = [
-                   col for col in data.columns if 'feature' in col and col != 'feature_0'] + ['weight']
-    for col in features:
-        data[col].fillna(data[col].mean(), inplace=True)
-    target = data['action']
+    data = data.query('date > 85').reset_index(drop=True)
+    if action == 'weight':
+        data['action'] = (
+                (data['weight'].values * data['resp'].values) > 0).astype('float32')
+    if action == 'combined':
+        data['action'] = (
+                (data['resp'].values > 0) and (data['resp_1'].values > 0) and (data['resp_2'].values > 0) and (
+                data['resp_3'].values > 0) and (data['resp_4'].values > 0)).astype('float32')
+    if action == 'multi':
+        resp_cols = ['resp', 'resp_1', 'resp_2', 'resp_3', 'resp_4']
+        for i in range(len(resp_cols)):
+            data['action_' + str(i)] = (data[resp_cols[i]] > 0).astype('int')
+    """
+    missing_col_sums = data.isna().sum()
+    missing_cols_10per = data.loc[:,
+                         missing_col_sums > len(data) * 0.1].columns
+    data = data.drop(missing_cols_10per, axis=1)
+    """
+    features = [col for col in data.columns if 'feature' in col] + ['weight']
     date = data['date']
+
+    if action == 'multi':
+        target = np.stack([data['action_' + str(i)]
+                           for i in range(len(resp_cols))])
+    else:
+        target = data['action']
     data = data[features]
     if scale:
         scaler = StandardScaler()
@@ -95,6 +157,33 @@ def preprocess_data(data, scale=False, nn=False):
     if not scale and nn:
         data = data.values
     return data, target, features, date
+
+
+def calc_data_mean(array, cache_dir, fold=None, train=True, mode='mean'):
+    if train:
+        if mode == 'mean':
+            f_mean = np.nanmean(array, axis=0)
+            if fold:
+                np.save(f'{cache_dir}/f_{fold}_mean.npy', f_mean)
+            else:
+                np.save(f'{cache_dir}/f_mean.npy', f_mean)
+            array = np.nan_to_num(array) + np.isnan(array) * f_mean
+        if mode == 'median':
+            f_med = np.nanmedian(array, axis=0)
+            np.save(f'{cache_dir}/f_median.npy', f_med)
+            array = np.nan_to_num(array) + np.isnan(array) * f_med
+        if mode == 'zero':
+            array = np.nan_to_num(array) + np.isnan(array) * 0
+    if not train:
+        if mode == 'mean':
+            f_mean = np.load(f'{cache_dir}/f_mean.npy')
+            array = np.nan_to_num(array) + np.isnan(array) * f_mean
+        if mode == 'median':
+            f_med = np.load(f'{cache_dir}/f_med.npy')
+            array = np.nan_to_num(array) + np.isnan(array) * f_med
+        if mode == 'zero':
+            array = np.nan_to_num(array) + np.isnan(array) * 0
+    return array
 
 
 def weighted_mean(scores, sizes):
@@ -128,3 +217,34 @@ def create_dataloaders(dataset: Dataset, indexes: dict, batch_size):
         dataloaders['test'] = DataLoader(
             dataset, sampler=test_sampler, num_workers=10, pin_memory=True)
     return dataloaders
+
+
+def seed_everything(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def load_model(path, input_size, output_size, p, pl_lightning):
+    if os.path.isdir(path):
+        models = []
+        for file in os.listdir(path):
+            if pl_lightning:
+                model = Classifier.load_from_checkpoint(checkpoint_path=file, input_size=input_size,
+                                                        output_size=output_size, params=p)
+            else:
+                model = Classifier(input_size, output_size, params=p)
+                model.load_state_dict(torch.load(file))
+            models.append(model)
+        return models
+    elif os.path.isfile(path):
+        if pl_lightning:
+            return Classifier.load_from_checkpoint(checkpoint_path=path, input_size=input_size,
+                                                   output_size=output_size, params=p)
+        else:
+            model = Classifier(input_size, output_size, params=p)
+            model.load_state_dict(torch.load(path))
+            return model

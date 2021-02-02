@@ -74,3 +74,20 @@ data_gt8000 = data[data['date'].isin(ts_id_dates_gt8000.index)]
 # %%
 mean_resp_weight = np.mean(data_gt8000['weight'])
 # %%
+missing_col_sums = data.isna().sum()
+# %%
+missing_cols_10per = data.loc[:, missing_col_sums > len(data)*0.1].columns
+
+# %%
+data = data.drop(missing_cols_10per, axis=1)
+# %%
+data['action'] = (data['weight'].values * data['resp'].values) > 0
+# %%
+data[data['action'] == True]
+# %%
+data['action_2'] = (data['resp']) > 0
+# %%
+data[data['action_2'] == True]
+# %%
+data.head()
+# %%
