@@ -159,18 +159,21 @@ def preprocess_data(data: pd.DataFrame, scale: bool = False, nn: bool = False,
     return data, target, features, date
 
 
-def calc_data_mean(array, cache_dir, fold=None, train=True, mode='mean'):
+def calc_data_mean(array, cache_dir=None, fold=None, train=True, mode='mean'):
     if train:
         if mode == 'mean':
             f_mean = np.nanmean(array, axis=0)
-            if fold:
+            if cache_dir and fold:
                 np.save(f'{cache_dir}/f_{fold}_mean.npy', f_mean)
-            else:
+            elif cache_dir:
                 np.save(f'{cache_dir}/f_mean.npy', f_mean)
             array = np.nan_to_num(array) + np.isnan(array) * f_mean
         if mode == 'median':
             f_med = np.nanmedian(array, axis=0)
-            np.save(f'{cache_dir}/f_median.npy', f_med)
+            if cache_dir and fold:
+                np.save(f'{cache_dir}/f_{fold}_median.npy', f_med)
+            elif cache_dir:
+                np.save(f'{cache_dir}/f_median.npy', f_med)
             array = np.nan_to_num(array) + np.isnan(array) * f_med
         if mode == 'zero':
             array = np.nan_to_num(array) + np.isnan(array) * 0
@@ -248,3 +251,8 @@ def load_model(path, input_size, output_size, p, pl_lightning):
             model = Classifier(input_size, output_size, params=p)
             model.load_state_dict(torch.load(path))
             return model
+
+
+def init_weights(m, func):
+    if type(m) == nn.Linear:
+        nn.init.xavier_normal_(m.weight, nn.init.calculate_gain(func))
