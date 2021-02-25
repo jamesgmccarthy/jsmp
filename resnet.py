@@ -1,62 +1,96 @@
+import torch
 import copy
 import os
-
 import numpy as np
-import torch
-import torch.nn as nn
 import pytorch_lightning as pl
-
-from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-
+import torch.nn as nn
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
-
+from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import janestreet
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
 from utils import load_data, preprocess_data, FinData, create_dataloaders, calc_data_mean, init_weights
 
 
-class Classifier(pl.LightningModule):
-    def __init__(self, input_size, output_size, params, model_path='models/'):
-        super(Classifier, self).__init__()
+class ResNet(pl.LightningModule):
+    def __init__(self, input_size, output_size, params):
+        super(ResNet, self).__init__()
         dim_1 = params['dim_1']
         dim_2 = params['dim_2']
         dim_3 = params['dim_3']
         dim_4 = params['dim_4']
-        self.dropout_prob = params['dropout']
+        dim_5 = params['dim_5']
+        self.drop_prob = params['dropout']
+        self.drop = nn.Dropout(self.drop_prob)
         self.lr = params['lr']
-        self.activation = params['activation']
+        self.activation = params['activation']()
         self.input_size = input_size
         self.output_size = output_size
         self.loss = nn.BCEWithLogitsLoss()
         self.weight_decay = params['weight_decay']
         self.amsgrad = params['amsgrad']
         self.label_smoothing = params['label_smoothing']
-        self.model_path = model_path
-        self.encoder = nn.Sequential(
-            nn.BatchNorm1d(input_size),
-            nn.Linear(input_size, dim_1, bias=False),
-            nn.BatchNorm1d(dim_1),
-            self.activation(),
-            nn.Dropout(p=self.dropout_prob),
-            nn.Linear(dim_1, dim_2, bias=False),
-            nn.BatchNorm1d(dim_2),
-            self.activation(),
-            nn.Dropout(p=self.dropout_prob),
-            nn.Linear(dim_2, dim_3, bias=False),
-            nn.BatchNorm1d(dim_3),
-            self.activation(),
-            nn.Dropout(p=self.dropout_prob),
-            nn.Linear(dim_3, dim_4, bias=False),
-            nn.BatchNorm1d(dim_4),
-            self.activation(),
-            nn.Dropout(p=self.dropout_prob),
-            nn.Linear(dim_4, self.output_size, bias=False)
-        )
+
+        # Layers
+        self.d0 = nn.Linear(input_size, dim_1)
+        self.d1 = nn.Linear(dim_1 + input_size, dim_2)
+        self.d2 = nn.Linear(dim_2 + dim_1, dim_3)
+        self.d3 = nn.Linear(dim_3 + dim_2, dim_4)
+        self.d4 = nn.Linear(dim_4 + dim_3, dim_5)
+        self.out = nn.Linear(dim_5 + dim_4, output_size)
+
+        # Batch Norm
+        self.bn0 = nn.BatchNorm1d(input_size)
+        self.bn1 = nn.BatchNorm1d(dim_1)
+        self.bn2 = nn.BatchNorm1d(dim_2)
+        self.bn3 = nn.BatchNorm1d(dim_3)
+        self.bn4 = nn.BatchNorm1d(dim_4)
+        self.bn5 = nn.BatchNorm1d(dim_5)
 
     def forward(self, x):
-        out = self.encoder(x)
+        x = self.bn0(x)
+
+        # block 0
+        x1 = self.d0(x)
+        x1 = self.bn1(x1)
+        x1 = self.activation(x1)
+        x1 = self.drop(x1)
+
+        x = torch.cat([x, x1], 1)
+
+        # block 1
+        x2 = self.d1(x)
+        x2 = self.bn2(x2)
+        x2 = self.activation(x2)
+        x2 = self.drop(x2)
+
+        x = torch.cat([x1, x2], 1)
+
+        # block 2
+        x3 = self.d2(x)
+        x3 = self.bn3(x3)
+        x3 = self.activation(x3)
+        x3 = self.drop(x3)
+
+        x = torch.cat([x2, x3], 1)
+
+        # block 3
+        x4 = self.d3(x)
+        x4 = self.bn4(x4)
+        x4 = self.activation(x4)
+        x4 = self.drop(x4)
+
+        x = torch.cat([x3, x4], 1)
+
+        # block 4
+        x5 = self.d4(x)
+        x5 = self.bn5(x5)
+        x5 = self.activation(x5)
+        x5 = self.drop(x5)
+
+        x = torch.cat([x4, x5], 1)
+        out = self.out(x)
         return out
 
     def training_step(self, batch, batch_idx):
@@ -101,9 +135,9 @@ class Classifier(pl.LightningModule):
         self.log('test_auc', epoch_auc)
 
     def configure_optimizers(self):
-        # weight_decay = self.weight_decay,
+        weight_decay = self.weight_decay
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
-                                     amsgrad=self.amsgrad)
+                                     amsgrad=self.amsgrad, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=5, factor=0.1, min_lr=1e-7, eps=1e-08
         )
@@ -127,7 +161,7 @@ def cross_val(p) -> object:
             os.path.join('models/', 'multi_class_fold_{}'.format(i)), monitor='val_auc', save_top_k=1, period=10,
             mode='max'
         )
-        model = Classifier(input_size, output_size, p)
+        model = ResNet(input_size, output_size, p)
         if p['activation'] == nn.ReLU:
             model.apply(lambda m: init_weights(m, 'relu'))
         elif p['activation'] == nn.LeakyReLU:
@@ -144,7 +178,7 @@ def cross_val(p) -> object:
         es = EarlyStopping(monitor='val_auc', patience=10,
                            min_delta=0.0005, mode='max')
         trainer = pl.Trainer(logger=tb_logger,
-                             max_epochs=1,
+                             max_epochs=100,
                              gpus=1,
                              callbacks=[checkpoint_callback, es],
                              precision=16)

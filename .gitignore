@@ -2,6 +2,8 @@
 /models
 /lightning_logs
 /janestreet
+/logs
+/cache
 *.pkl
 *.txt
 *.pth
@@ -12,3 +14,6 @@
 *.png
 *.ipynb
 *.ckpt
+autoencoder.py
+modelling.py
+nn_modelling.py
