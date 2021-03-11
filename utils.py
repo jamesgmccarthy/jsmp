@@ -39,11 +39,7 @@ class FinData(Dataset):
                     }
                 elif self.multi == True:
                     sample = {
-<<<<<<< HEAD
-                        'target': torch.Tensor([self.target[i, index] for i in range(self.target.shape[0])]),
-=======
                         'target': torch.Tensor(self.target[index]),
->>>>>>> 17c65b0... post submission commit
                         'data':   torch.FloatTensor(self.data[index]),
                         'date':   torch.Tensor(self.date.iloc[index].values)
                     }
@@ -57,11 +53,7 @@ class FinData(Dataset):
                     }
                 elif self.multi == True:
                     sample = {
-<<<<<<< HEAD
-                        'target': torch.Tensor([self.target[i, index] for i in range(self.target.shape[0])]),
-=======
                         'target': torch.Tensor(self.target[index]),
->>>>>>> 17c65b0... post submission commit
                         'data':   torch.FloatTensor(self.data[index]),
                         'date':   torch.Tensor(self.date.iloc[index])
                     }
@@ -134,43 +126,19 @@ def preprocess_data(data: pd.DataFrame, scale: bool = False, nn: bool = False,
     data = data.query('weight > 0').reset_index(drop=True)
     data = data.query('date > 85').reset_index(drop=True)
     if action == 'weight':
-<<<<<<< HEAD
-        data['action'] = (
-                (data['weight'].values * data['resp'].values) > 0).astype('float32')
-    if action == 'combined':
-        data['action'] = (
-                (data['resp'].values > 0) and (data['resp_1'].values > 0) and (data['resp_2'].values > 0) and (
-                data['resp_3'].values > 0) and (data['resp_4'].values > 0)).astype('float32')
-    if action == 'multi':
-        resp_cols = ['resp', 'resp_1', 'resp_2', 'resp_3', 'resp_4']
-        for i in range(len(resp_cols)):
-            data['action_' + str(i)] = (data[resp_cols[i]] > 0).astype('int')
-    """
-    missing_col_sums = data.isna().sum()
-    missing_cols_10per = data.loc[:,
-                         missing_col_sums > len(data) * 0.1].columns
-    data = data.drop(missing_cols_10per, axis=1)
-    """
-=======
         data['action'] = (data['resp'].values > 0).astype('float32')
     if action == 'multi':
         resp_cols = ['resp', 'resp_1', 'resp_2', 'resp_3', 'resp_4']
         for i in range(len(resp_cols)):
             data['action_' + str(i)] = (data['weight'] *
                                         data[resp_cols[i]] > 0).astype('int')
->>>>>>> 17c65b0... post submission commit
     features = [col for col in data.columns if 'feature' in col] + ['weight']
     date = data['date']
 
     if action == 'multi':
-<<<<<<< HEAD
-        target = np.stack([data['action_' + str(i)]
-                           for i in range(len(resp_cols))])
-=======
         target = np.array([data['action_' + str(i)]
                            for i in range(len(resp_cols))]).T
 
->>>>>>> 17c65b0... post submission commit
     else:
         target = data['action']
     data = data[features]
@@ -279,12 +247,9 @@ def load_model(path, input_size, output_size, p, pl_lightning):
 def init_weights(m, func):
     if type(m) == nn.Linear:
         nn.init.xavier_normal_(m.weight, nn.init.calculate_gain(func))
-<<<<<<< HEAD
-=======
 
 
 def read_api_token(file='api.txt'):
     with open(file, 'r') as f:
         api = f.readline()
     return api
->>>>>>> 17c65b0... post submission commit

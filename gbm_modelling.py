@@ -13,7 +13,7 @@ import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from utils import weighted_mean, load_data, preprocess_data
+from utils import read_api_token, weighted_mean, load_data, preprocess_data
 
 
 def optimize(trial: optuna.trial.Trial):
@@ -119,7 +119,7 @@ for i, (tr_idx, val_idx) in enumerate(gts.split(data, groups=date)):
         score = roc_auc_score(y_val, preds)
         print(f'Fold {i} ROC AUC:\t', score)
 """
-api_token = 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91cmwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiYWQxMjg3OGEtMGI1NC00NzFmLTg0YmMtZmIxZjcxZDM2NTAxIn0='
+api_token = read_api_token()
 neptune.init(api_token=api_token,
              project_qualified_name='jamesmccarthy65/JSMP')
 data = load_data('data/', mode='train', overide='filtered_train.csv')

@@ -90,8 +90,10 @@ class AutoEncoder(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, amsgrad=self.amsgrad)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.1, min_lr=1e-7, eps=1e-8)
+        optimizer = torch.optim.Adam(
+            self.parameters(), lr=self.lr, amsgrad=self.amsgrad)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=5, factor=0.1, min_lr=1e-7, eps=1e-8)
         return {'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 't_loss'}
 
 
@@ -114,14 +116,18 @@ def train_autoencoder():
     train_idx = [i for i in range(len(data))]
     val_idx = [i for i in range(10000)]
     dataloaders = utils.create_dataloaders(dataset=dataset,
-                                           indexes={'train': train_idx, 'val': val_idx},
+                                           indexes={
+                                               'train': train_idx, 'val': val_idx},
                                            batch_size=p['batch_size'])
 
-    checkpoint_callback = ModelCheckpoint(dirpath='logs', monitor='t_loss', mode='min', save_top_k=1, period=10)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='logs', monitor='t_loss', mode='min', save_top_k=1, period=10)
     input_size = data.shape[-1]
     output_size = 1
-    model = AutoEncoder(input_size=input_size, output_size=output_size, params=p)
-    es = EarlyStopping(monitor='t_loss', patience=10, min_delta=0.0005, mode='min')
+    model = AutoEncoder(input_size=input_size,
+                        output_size=output_size, params=p)
+    es = EarlyStopping(monitor='t_loss', patience=10,
+                       min_delta=0.0005, mode='min')
     trainer = pl.Trainer(max_epochs=500, gpus=1, callbacks=[checkpoint_callback, es],
                          precision=16)
     trainer.fit(model, train_dataloader=dataloaders['train'])
