@@ -13,9 +13,13 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
 import torch
 import numpy as np
+<<<<<<< HEAD
+from lightning_nn import Classifier
+=======
 from resnet import ResNet as Classifier
+>>>>>>> 17c65b0... post submission commit
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from utils import load_data, preprocess_data, FinData, read_api_token, weighted_mean, seed_everything, calc_data_mean, \
+from utils import load_data, preprocess_data, FinData, weighted_mean, seed_everything, calc_data_mean, \
     create_dataloaders
 
 
@@ -74,9 +78,16 @@ def create_param_dict(trial, trial_file=None):
 
 
 def optimize(trial: optuna.Trial, data_dict):
+<<<<<<< HEAD
+    gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=31)
+    batch_size = trial.suggest_int('batch_size', 8000, 15000)
+    input_size = data_dict['data'].shape[-1]
+    output_size = 1
+=======
     gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=10)
     input_size = data_dict['data'].shape[-1]
     output_size = 5
+>>>>>>> 17c65b0... post submission commit
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         os.path.join('models/', "trial_resnet_{}".format(trial.number)), monitor="val_auc", mode='max')
     logger = MetricsCallback()
@@ -85,6 +96,22 @@ def optimize(trial: optuna.Trial, data_dict):
     # trial_file = 'HPO/nn_hpo_2021-01-05.pkl'
     trial_file = None
     p = create_param_dict(trial, trial_file)
+<<<<<<< HEAD
+    for i, (train_idx, val_idx) in enumerate(gts.split(data_dict['data'], groups=data_dict['date'])):
+        model = Classifier(input_size, output_size, params=p)
+        # model.apply(init_weights)
+        train_set, val_set = Subset(
+            data_dict['dataset'], train_idx), Subset(data_dict['dataset'], val_idx)
+        train_sampler = BatchSampler(SequentialSampler(
+            train_set), batch_size=batch_size, drop_last=False)
+        val_sampler = BatchSampler(SequentialSampler(
+            val_set), batch_size=batch_size, drop_last=False)
+        dataloaders = {
+            'train': DataLoader(data_dict['dataset'], sampler=train_sampler, num_workers=10, pin_memory=True),
+            'val': DataLoader(data_dict['dataset'], sampler=val_sampler, num_workers=10, pin_memory=True)}
+        es = EarlyStopping(monitor='val_auc', patience=10,
+                           min_delta=0.0005, mode='max')
+=======
     p['batch_size'] = trial.suggest_int('batch_size', 8000, 15000)
     for i, (train_idx, val_idx) in enumerate(gts.split(data_dict['data'], groups=data_dict['date'])):
         idx = np.concatenate([train_idx, val_idx])
@@ -104,6 +131,7 @@ def optimize(trial: optuna.Trial, data_dict):
             dataset, indexes={'train': train_idx, 'val': val_idx}, batch_size=p['batch_size'])
         es = EarlyStopping(monitor='val_loss', patience=10,
                            min_delta=0.0005, mode='min')
+>>>>>>> 17c65b0... post submission commit
         trainer = pl.Trainer(logger=False,
                              max_epochs=500,
                              gpus=1,
@@ -120,12 +148,28 @@ def optimize(trial: optuna.Trial, data_dict):
 
 
 def main():
+<<<<<<< HEAD
+    torch.manual_seed(0)
+    np.random.seed(0)
+    data = load_data(root_dir='./data/', mode='train')
+    data, target, features, date = preprocess_data(data, nn=True)
+    dataset = FinData(data=data, target=target, date=date)
+    api_token = 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91cmwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiYWQxMjg3OGEtMGI1NC00NzFmLTg0YmMtZmIxZjcxZDM2NTAxIn0='
+    neptune.init(api_token=api_token,
+                 project_qualified_name='jamesmccarthy65/JSMP')
+    nn_exp = neptune.create_experiment('NN_HPO')
+    nn_neptune_callback = opt_utils.NeptuneCallback(experiment=nn_exp)
+    pruner = optuna.pruners.MedianPruner()
+    study = optuna.create_study(direction='maximize', pruner=pruner)
+    data_dict = {'data': data, 'target': target,
+                 'features': features, 'date': date, 'dataset': dataset}
+=======
     seed_everything(0)
     data = load_data(root_dir='./data/', mode='train')
     data, target, features, date = preprocess_data(
         data, nn=True, action='multi')
 
-    api_token = read_api_token()
+    api_token = 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91cmwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiYWQxMjg3OGEtMGI1NC00NzFmLTg0YmMtZmIxZjcxZDM2NTAxIn0='
     neptune.init(api_token=api_token,
                  project_qualified_name='jamesmccarthy65/JSMP')
     nn_exp = neptune.create_experiment('Resnet_HPO_Multiclass')
@@ -133,6 +177,7 @@ def main():
     study = optuna.create_study(direction='minimize')
     data_dict = {'data': data, 'target': target,
                  'features': features, 'date': date}
+>>>>>>> 17c65b0... post submission commit
     study.optimize(lambda trial: optimize(trial, data_dict=data_dict), n_trials=100,
                    callbacks=[nn_neptune_callback])
     joblib.dump(study, f'HPO/nn_hpo_{str(datetime.datetime.now().date())}.pkl')

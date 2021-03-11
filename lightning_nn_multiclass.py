@@ -2,6 +2,18 @@ import copy
 import os
 
 import numpy as np
+<<<<<<< HEAD
+import pandas as pd
+import torch
+import torch.nn as nn
+import pytorch_lightning as pl
+import torch.nn.functional as F
+from numba import njit
+from pytorch_lightning import Callback
+from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+=======
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -9,6 +21,7 @@ import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
+>>>>>>> 17c65b0... post submission commit
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 
@@ -62,8 +75,13 @@ class Classifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch['data'], batch['target']
         x = x.view(x.size(1), -1)
+<<<<<<< HEAD
+        logits = self(x)
+        logits = logits.view(-1)
+=======
         y = y.view(y.size(1), -1)
         logits = self(x)
+>>>>>>> 17c65b0... post submission commit
         loss = self.loss(input=logits, target=y)
         logits = torch.sigmoid(logits)
         auc_metric = roc_auc_score(y_true=y.cpu().numpy(),
@@ -76,8 +94,13 @@ class Classifier(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch['data'], batch['target']
         x = x.view(x.size(1), -1)
+<<<<<<< HEAD
+        logits = self(x)
+        logits = logits.view(-1)
+=======
         y = y.view(y.size(1), -1)
         logits = self(x)
+>>>>>>> 17c65b0... post submission commit
         loss = self.loss(input=logits,
                          target=y)
         logits = torch.sigmoid(logits)
@@ -112,10 +135,16 @@ class Classifier(pl.LightningModule):
 
 def cross_val(p) -> object:
     data_ = load_data(root_dir='./data/', mode='train')
+<<<<<<< HEAD
+    data_, target_, features, date = preprocess_data(data_, nn=True, action='multi')
+    input_size = data_.shape[-1]
+    output_size = target_.shape[0]
+=======
     data_, target_, features, date = preprocess_data(
         data_, nn=True, action='multi')
     input_size = data_.shape[-1]
     output_size = target_.shape[-1]
+>>>>>>> 17c65b0... post submission commit
     gts = PurgedGroupTimeSeriesSplit(n_splits=5, group_gap=5)
     models = []
     tb_logger = pl_loggers.TensorBoardLogger('logs/multiclass_')
@@ -134,17 +163,27 @@ def cross_val(p) -> object:
             model.apply(lambda m: init_weights(m, 'leaky_relu'))
         train_idx = [i for i in range(0, max(train_idx) + 1)]
         val_idx = [i for i in range(len(train_idx), len(idx))]
+<<<<<<< HEAD
+        data[train_idx] = calc_data_mean(data[train_idx], './cache', train=True, mode='mean')
+        data[val_idx] = calc_data_mean(data[val_idx], './cache', train=False, mode='mean')
+        dataset = FinData(data=data, target=target, date=date)
+=======
         data[train_idx] = calc_data_mean(
             data[train_idx], './cache', train=True, mode='mean')
         data[val_idx] = calc_data_mean(
             data[val_idx], './cache', train=False, mode='mean')
         dataset = FinData(data=data, target=target, date=date, multi=True)
+>>>>>>> 17c65b0... post submission commit
         dataloaders = create_dataloaders(
             dataset, indexes={'train': train_idx, 'val': val_idx}, batch_size=p['batch_size'])
         es = EarlyStopping(monitor='val_auc', patience=10,
                            min_delta=0.0005, mode='max')
         trainer = pl.Trainer(logger=tb_logger,
+<<<<<<< HEAD
+                             max_epochs=5,
+=======
                              max_epochs=1,
+>>>>>>> 17c65b0... post submission commit
                              gpus=1,
                              callbacks=[checkpoint_callback, es],
                              precision=16)
@@ -155,6 +194,15 @@ def cross_val(p) -> object:
     return models, features
 
 
+<<<<<<< HEAD
+def main():
+    p = {'batch_size':   4986, 'dim_1': 248, 'dim_2': 487,
+         'dim_3':        269, 'dim_4': 218, 'dim_5': 113,
+         'activation':   nn.ReLU, 'dropout': 0.01563457578202565,
+         'lr':           0.00026372556533974916, 'label_smoothing': 0.06834918091900156,
+         'weight_decay': 0.005270589494631074, 'amsgrad': False}
+    models, features = cross_val(p)
+=======
 def fillna_npwhere(array, values):
     if np.isnan(array.sum()):
         array = np.nan_to_num(array) + np.isnan(array) * values
@@ -202,6 +250,7 @@ def main():
          'batch_size': 10072}
     models, features = cross_val(p)
     test_model(models, features)
+>>>>>>> 17c65b0... post submission commit
 
 
 if __name__ == '__main__':
