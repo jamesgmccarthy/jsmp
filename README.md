@@ -19,5 +19,12 @@ I followed a relatively simple approach to this problem as I wanted to focus on 
 - First 85 days removed - Findings showed target vairable had high variance in first 85 days. Believed whatever model used by Jane Street to create repsonse variable was performing poorly and changed afterwards.
 - Missing values were filled with mean of training datasets
 - Target variable was all 5 response variables for a binary multilabel classification target
-- Didn't mess with threshold of 0.5, felt like didn't have any meaningful reason to.
-- Mean of all 
+- Mean of target varaibles act as final prediction
+
+### Model
+5 layer ResNet model written in Pytorch Lightning. Hyperparameters were arrived at using multiple cross-validation trials with Optuna. 
+- Layer Dims: [167, 454, 371, 369, 155]
+- Activation Function: Leaky Relu, used to avoid the "dying ReLu" problem.
+- Dropout: 0.2106 
+- Learning Rate: 0.0022
+
