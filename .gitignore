@@ -1,5 +1,4 @@
 /data
-/models
 /lightning_logs
 /janestreet
 *.pkl
@@ -12,10 +11,7 @@
 *.png
 
 *.ckpt
-models/gbm_modelling.py
-lstm_modelling.py
-models/modelling.py
-models/nn_modelling.py
+
 *.npy
 *.yaml
 events.out*
