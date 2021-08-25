@@ -121,7 +121,7 @@ def main():
     seed_everything(0)
     data = load_data(root_dir='./data/', mode='train')
     data, target, features, date = preprocess_data(
-        data, nn=True, action='multi')
+        data, nn=True)
 
     api_token = read_api_token()
     neptune.init(api_token=api_token,
