@@ -10,7 +10,7 @@
 *.idea
 *.csv
 *.png
-*.ipynb
+
 *.ckpt
 models/gbm_modelling.py
 lstm_modelling.py
