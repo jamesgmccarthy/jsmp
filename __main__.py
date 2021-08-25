@@ -1,9 +1,4 @@
-import lightning_nn
-import nn_hpo
-import autoencoder
-import lightning_nn_multiclass
-import gbm_hpo
-import resnet
+from HPO import nn_hpo
 
 
 def main():

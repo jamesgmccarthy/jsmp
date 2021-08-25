@@ -2,18 +2,16 @@
 import datetime
 import gc
 import copy
-import datatable as dt
 import joblib
 import lightgbm as lgb
 import neptune
 import neptunecontrib.monitoring.optuna as opt_utils
-import numpy as np
 import optuna
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score
 
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from utils import read_api_token, weighted_mean, load_data, preprocess_data, calc_data_mean
+from utils.utils import read_api_token, weighted_mean, load_data, preprocess_data, calc_data_mean
 
 
 def optimize(trial: optuna.trial.Trial, data_dict: dict):

@@ -10,12 +10,10 @@ import torch.nn as nn
 from optuna.integration import PyTorchLightningPruningCallback
 from pytorch_lightning import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from torch.utils.data import Subset, BatchSampler, SequentialSampler, DataLoader
-import torch
 import numpy as np
-from resnet import ResNet as Classifier
+from models.resnet import ResNet as Classifier
 from purged_group_time_series import PurgedGroupTimeSeriesSplit
-from utils import load_data, preprocess_data, FinData, read_api_token, weighted_mean, seed_everything, calc_data_mean, \
+from utils.utils import load_data, preprocess_data, FinData, read_api_token, weighted_mean, seed_everything, calc_data_mean, \
     create_dataloaders
 
 
@@ -78,7 +76,7 @@ def optimize(trial: optuna.Trial, data_dict):
     input_size = data_dict['data'].shape[-1]
     output_size = 5
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        os.path.join('models/', "trial_resnet_{}".format(trial.number)), monitor="val_auc", mode='max')
+        os.path.join('../models/', "trial_resnet_{}".format(trial.number)), monitor="val_auc", mode='max')
     logger = MetricsCallback()
     metrics = []
     sizes = []

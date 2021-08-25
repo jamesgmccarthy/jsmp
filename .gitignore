@@ -12,10 +12,10 @@
 *.png
 *.ipynb
 *.ckpt
-gbm_modelling.py
+models/gbm_modelling.py
 lstm_modelling.py
-modelling.py
-nn_modelling.py
+models/modelling.py
+models/nn_modelling.py
 *.npy
 *.yaml
 events.out*
